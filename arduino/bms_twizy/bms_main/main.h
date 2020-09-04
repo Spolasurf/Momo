@@ -20,7 +20,7 @@ struct can_frame lastCanMsg;
 struct SCanBusMsg {
   int ID = 0;
   unsigned long lastSend = 0;
-  };
+};
 
 SCanBusMsg canBusMessages[30];
 
@@ -49,7 +49,7 @@ unsigned long lastPublishedMotorTemp = 0;
 unsigned long lastPublishedControllerTemp = 0;
 unsigned long lastPublishedMotorRpm = 0;
 
-unsigned long int lastTry = -60000;
+unsigned long int lastTryWifi = -60000;
 unsigned long int lastTryMqtt = -10000;
 unsigned long int lastTryCan = 0;
 
@@ -84,16 +84,18 @@ void receiveMessages();
 
 void read12Voltage();
 
-void setup_wifi();
 void setupCan();
-void reconnect();
+void setupMqtt();
+
+void connectWifi();
+void connectMqtt();
 
 void printRawMsg(can_frame msg);
 void decodeMsg(can_frame msg);
 void switchRelays();
 
 
-void callback(char* topic, byte* payload, unsigned int length);
+void mqttCallback(char* topic, byte* payload, unsigned int length);
 
 unsigned int twoBytes2int(unsigned char a, unsigned char b);
 double threeBytes2double(unsigned char a, unsigned char b, unsigned char c);

@@ -1,2 +1,3 @@
 # Momo
-Software for sailing vessel Momo
+Software for sailing vessel Momo.
+

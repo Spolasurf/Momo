@@ -32,10 +32,10 @@ void setup()
 {
     Serial.begin(2000000);
     delay(10);
-    setup_wifi();
     setupCan();
-    client.setServer(MQTT_BROKER, 1883);
-    client.setCallback(callback);
+    setupMqtt();
+    
+    connectWifi();
 
     pinMode(D1, OUTPUT); //Setzte Dc/DcWandler
     pinMode(D2, OUTPUT); // Setze Sevcon
@@ -46,38 +46,26 @@ void setup()
     digitalWrite(D3, LOW); //Main Relay
 }
 
-void setup_wifi()
-{
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("");
-        Serial.println("WiFi connected");
-        Serial.println("IP address: ");
-        Serial.println(WiFi.localIP());
-    }
-    else {
-        Serial.println("Versuche mit WIFI zu verbinden...");
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(SSID, PSK);
-        WiFi.setAutoReconnect(true);
-    }
+void setupMqtt() {
+    client.setServer(MQTT_BROKER, 1883);
+    client.setCallback(mqttCallback);
 }
 
-void setupCan()
-{
+void setupCan() {
     SPI.begin();
-    // set baud rate, frequency and mode for CAN communication
     mcp2515.reset();
+    // set baud rate, frequency and mode for CAN communication
     mcp2515.setBitrate(CAN_500KBPS, MCP_16MHZ);
     mcp2515.setNormalMode();
     Serial.println("CAN initialisiert");
     lastTryCan = millis();
 }
 
-void callback(char* topic, byte* payload, unsigned int length)
-{
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.print("Received message [");
     Serial.print(topic);
     Serial.print("] ");
+
     char msg[length + 1];
     for (int i = 0; i < length; i++) {
         Serial.print((char)payload[i]);
@@ -94,47 +82,43 @@ void callback(char* topic, byte* payload, unsigned int length)
         dcdcRelay = atoi(msg);
     if (strcmp(topic, "bms/sevconRelay") == 0)
         sevconRelay = atoi(msg);
+
     lastMsgReceived = millis();
     return;
 }
 
-void reconnect()
-{
-    if (millis() - lastTryMqtt > 3000 && WiFi.status() == WL_CONNECTED) {
-        SPI.endTransaction();        
-        if (client.connect("arduinoClient1", "Sandy", "Sandy2018")) {
-            client.subscribe("bms/mainRelay");
-            client.subscribe("bms/dcdcRelay");
-            client.subscribe("bms/sevconRelay");
-        }
-        else {
-            Serial.println("MQTT nicht verbunden. Versuche Verbindung erneut herzustellen in 3s.");
-            lastTryMqtt = millis();
-        }
-        SPI.begin();
+void connectMqtt() {
+    if (millis() - lastTryMqtt < 3000) return;
+    if (WiFi.connected() == false) return;
+    if (client.connected() == true) return;
+
+    SPI.endTransaction();        
+    if (client.connect("arduinoClient1", "Sandy", "Sandy2018")) {
+        client.subscribe("bms/mainRelay");
+        client.subscribe("bms/dcdcRelay");
+        client.subscribe("bms/sevconRelay");
+    } else {
+        Serial.println("MQTT nicht verbunden, versuche erneut in 3s.");
     }
+    
+    SPI.begin();
+    lastTryMqtt = millis();
 }
 
-void loop()
-{
-   if (millis() - lastTry > 6000) {
-        if (WiFi.status() == WL_CONNECTED) {
-            Serial.println("WIFI verbunden.");
-        }
-        else {
-            Serial.println("WIFI nicht verbunden.Versuche erneut.");
-            WiFi.reconnect();
-        }
-        lastTry = millis();
-    }
-    
-    if (!client.connected()) {
-        reconnect();
-    }
-    
-   // if (millis() - lastMillisReceived > 5000 && millis() - lastTryCan > 5000) {
-   //     setupCan();
-   // }
+void connectWifi() {
+    if (millis() - lastTryWifi < 6000) return;
+    if (WiFi.connected() == true) return;
+
+    Serial.println("WIFI nicht verbunden, versuche jetzt und erneut in 6s.");
+    WiFi.begin(SSID, PSK);
+    WiFi.setAutoReconnect(true);
+
+    lastTryWifi = millis();
+}
+
+void loop() {
+    connectWifi();
+    connectMqtt();
 
     checkBMSState();
     sendMessages();
@@ -147,9 +131,7 @@ void loop()
 }
 
 // METHODS
-
-void switchRelays()
-{
+void switchRelays() {
     if (millis() - lastPublishedStatus > 3000) {
         if (bmsStatus == 1) {
             publishMsg("bms/status", "BMS Bereit.");
@@ -158,8 +140,7 @@ void switchRelays()
                 mainRelay = 1;
                 dcdcRelay = 1;
             }
-        }
-        else {
+        } else {
             publishMsg("bms/status", errorMsgChar);
             Serial.println(errorMsgChar);
             Serial.println(maxInPower);
@@ -181,30 +162,23 @@ void switchRelays()
         publishMsg("bms/sevconRelay2", sevconRelay);
     }
 
-    if (mainRelay == 1 && bmsStatus == 1) {
+    if (mainRelay == 1 && bmsStatus == 1)
         digitalWrite(D3, HIGH);
-    }
-    else {
+    else
         digitalWrite(D3, LOW);
-    }
 
-    if (dcdcRelay == 1 && bmsStatus == 1) {
+    if (dcdcRelay == 1 && bmsStatus == 1)
         digitalWrite(D1, HIGH);
-    }
-    else {
+    else
         digitalWrite(D1, LOW);
-    }
 
-    if (sevconRelay == 1 && bmsStatus == 1) {
+    if (sevconRelay == 1 && bmsStatus == 1)
         digitalWrite(D2, HIGH);
-    }
-    else {
+    else
         digitalWrite(D2, LOW);
-    }
 }
 
-void receiveMessages()
-{
+void receiveMessages() {
     if (mcp2515.readMessage(&canMsg) == MCP2515::ERROR_OK /*&& canMsg.can_id != lastCanMsg.can_id*/) {
         printRawMsg(canMsg);
         if(step == 4) {
@@ -216,12 +190,12 @@ void receiveMessages()
         }
     }
 
-    if(step < 4) { errorMsg = "BMS konnte nicht intiatilisiert werden!";}
-    else if(maxInPower < 100) { errorMsg = "MaxInPower kleiner als 100W";}
-    else if(maxOutPower < 100) { errorMsg = "MaxOutPower kleiner als 100W";}
-    else if(maxTemp > 35) { errorMsg = "Batterietemperatur größer als 35°C";}
-    else if(millis() - lastMillisReceived > 1000) { errorMsg = "Länger als 1s keine Nachricht erhalten";}
-    else if(batteryPercentage <= 0) { errorMsg = "Ladezustand kleiner gleich 0%";}
+    if (step < 4) errorMsg = "BMS konnte nicht intiatilisiert werden!";
+    else if (maxInPower < 100) errorMsg = "MaxInPower kleiner als 100W";
+    else if (maxOutPower < 100) errorMsg = "MaxOutPower kleiner als 100W";
+    else if (maxTemp > 35) errorMsg = "Batterietemperatur größer als 35°C";
+    else if (millis() - lastMillisReceived > 1000) errorMsg = "Länger als 1s keine Nachricht erhalten";
+    else if (batteryPercentage <= 0) errorMsg = "Ladezustand kleiner gleich 0%";
     else {
         bmsStatus = 1;
         lastStatus = millis();
@@ -234,18 +208,16 @@ void receiveMessages()
     }
 }
 
-void read12Voltage()
-{
-    if (millis() - lastPublished12V > 10000) {
-        double sensorValue = analogRead(A0) * 0.065;
-        if(publishMsg("bms/12V", sensorValue) == 1) lastPublished12V = millis();
-    }
+void read12Voltage() {
+    if (millis() - lastPublished12V < 10000) return;
+
+    double sensorValue = analogRead(A0) * 0.065;
+    if (publishMsg("bms/12V", sensorValue) == 1) lastPublished12V = millis();
 }
 
 // HELPERS
 
-void printRawMsg(can_frame msg)
-{
+void printRawMsg(can_frame msg) {
     if (1 == 0) {
         Serial.print("ID: ");
         Serial.print(msg.can_id, HEX); // print ID
